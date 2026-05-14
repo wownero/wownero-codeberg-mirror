@@ -1244,11 +1244,19 @@ std::string OS::currentHost(void) {
 #endif  // ELPP_OS_UNIX && !ELPP_OS_ANDROID
 }
 
+static bool endswith(const std::string &s, const std::string &ending)
+{
+    return s.size() >= ending.size() && s.substr(s.size() - ending.size()) == ending;
+}
+
+bool OS::termSupportsColor(std::string& term) {
+  return term == "xterm" || term == "screen" || term == "linux" || term == "cygwin"
+        || endswith(term, "-color") || endswith(term, "-256color");
+}
+
 bool OS::termSupportsColor(void) {
   std::string term = getEnvironmentVariable("TERM", "");
-  return term == "xterm" || term == "xterm-color" || term == "xterm-256color"
-         || term == "screen" || term == "linux" || term == "cygwin"
-         || term == "screen-256color" || term == "screen.xterm-256color";
+  return termSupportsColor(term);
 }
 
 // DateTime
@@ -3057,8 +3065,9 @@ void Writer::triggerDispatch(void) {
   }
   if (m_proceed && m_level == Level::Fatal
       && !ELPP->hasFlag(LoggingFlag::DisableApplicationAbortOnFatalLog)) {
+    const std::string str = "Aborting application. Reason: Fatal log at [" + std::string(m_file) + ":" + std::to_string(m_line) + "]";
     base::Writer(Level::Warning, Color::Default, m_file, m_line, m_func).construct(1, base::consts::kDefaultLoggerId)
-        << "Aborting application. Reason: Fatal log at [" << m_file << ":" << m_line << "]";
+        << str;
     std::stringstream reasonStream;
     reasonStream << "Fatal log at [" << m_file << ":" << m_line << "]"
                  << " If you wish to disable 'abort on fatal log' please use "

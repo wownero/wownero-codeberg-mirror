@@ -44,6 +44,7 @@
 #include "net/network_throttle-detail.hpp"
 #include "common/pruning.h"
 #include "common/util.h"
+#include "misc_log_ex.h"
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "net.cn"
@@ -55,8 +56,10 @@
     const char *cat = "net.p2p.msg"; \
     if (ELPP->vRegistry()->allowed(level, cat)) { \
       init; \
-      if (test) \
-        el::base::Writer(level, el::Color::Default, __FILE__, __LINE__, ELPP_FUNC, el::base::DispatchAction::NormalLog).construct(cat) << x; \
+      if (test) { \
+        LOG_TO_STRING(x); \
+        el::base::Writer(level, el::Color::Default, __FILE__, __LINE__, ELPP_FUNC, el::base::DispatchAction::NormalLog).construct(cat) << str; \
+      } \
     } \
   } while(0)
 
@@ -113,7 +116,7 @@ namespace cryptonote
       if (is_pruned)
       {
         if ((parse_success = cryptonote::parse_and_validate_tx_base_from_blob(tx_entry.blob, tx)))
-          tx_hash = cryptonote::get_pruned_transaction_hash(tx, tx_entry.prunable_hash);
+          parse_success = cryptonote::get_pruned_transaction_hash(tx, tx_entry.prunable_hash, tx_hash);
       }
       else
       {
@@ -271,8 +274,7 @@ namespace cryptonote
     {
       NOTIFY_REQUEST_CHAIN::request r = {};
       context.m_needed_objects.clear();
-      context.m_expect_height = m_core.get_current_blockchain_height();
-      m_core.get_short_chain_history(r.block_ids);
+      m_core.get_short_chain_history(r.block_ids, context.m_expect_height);
       handler_request_blocks_history( r.block_ids ); // change the limit(?), sleep(?)
       r.prune = m_sync_pruned_blocks;
       context.m_last_request_time = boost::posix_time::microsec_clock::universal_time();
@@ -727,8 +729,7 @@ namespace cryptonote
       context.m_needed_objects.clear();
       context.m_state = cryptonote_connection_context::state_synchronizing;
       NOTIFY_REQUEST_CHAIN::request r = {};
-      context.m_expect_height = m_core.get_current_blockchain_height();
-      m_core.get_short_chain_history(r.block_ids);
+      m_core.get_short_chain_history(r.block_ids, context.m_expect_height);
       handler_request_blocks_history( r.block_ids ); // change the limit(?), sleep(?)
       r.prune = m_sync_pruned_blocks;
       context.m_last_request_time = boost::posix_time::microsec_clock::universal_time();
@@ -854,7 +855,7 @@ namespace cryptonote
     std::vector<cryptonote::blobdata> local_txs;
 
     std::vector<cryptonote::blobdata> txes;
-    if (!m_core.get_txpool_complement(arg.hashes, txes))
+    if (!m_core.get_txpool_complement(std::move(arg.hashes), txes))
     {
       LOG_ERROR_CCONTEXT("failed to get txpool complement");
       return 1;
@@ -1474,14 +1475,28 @@ namespace cryptonote
             return 1;
           }
 
+          bool stopped = false;
+          auto cleanup_on_exit = epee::misc_utils::create_scope_leave_handler([this, &stopped, &context, span_connection_id, start_height]() {
+            if (!m_core.cleanup_handle_incoming_blocks())
+            {
+              LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");
+              return;
+            }
+
+            if (stopped)
+              return;
+
+            m_block_queue.remove_spans(span_connection_id, start_height);
+          });
+
           uint64_t block_process_time_full = 0, transactions_process_time_full = 0;
           size_t num_txs = 0, blockidx = 0;
           for(const block_complete_entry& block_entry: blocks)
           {
             if (m_stopping)
             {
-                m_core.cleanup_handle_incoming_blocks();
-                return 1;
+              stopped = true;
+              return 1;
             }
 
             // process transactions
@@ -1500,13 +1515,6 @@ namespace cryptonote
                 }))
                   LOG_ERROR_CCONTEXT("span connection id not found");
 
-                if (!m_core.cleanup_handle_incoming_blocks())
-                {
-                  LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");
-                  return 1;
-                }
-                // in case the peer had dropped beforehand, remove the span anyway so other threads can wake up and get it
-                m_block_queue.remove_spans(span_connection_id, start_height);
                 return 1;
             }
             TIME_MEASURE_FINISH(transactions_process_time);
@@ -1533,14 +1541,6 @@ namespace cryptonote
               }))
                 LOG_ERROR_CCONTEXT("span connection id not found");
 
-              if (!m_core.cleanup_handle_incoming_blocks())
-              {
-                LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");
-                return 1;
-              }
-
-              // in case the peer had dropped beforehand, remove the span anyway so other threads can wake up and get it
-              m_block_queue.remove_spans(span_connection_id, start_height);
               return 1;
             }
             if(bvc.m_marked_as_orphaned)
@@ -1553,14 +1553,6 @@ namespace cryptonote
               }))
                 LOG_ERROR_CCONTEXT("span connection id not found");
 
-              if (!m_core.cleanup_handle_incoming_blocks())
-              {
-                LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");
-                return 1;
-              }
-
-              // in case the peer had dropped beforehand, remove the span anyway so other threads can wake up and get it
-              m_block_queue.remove_spans(span_connection_id, start_height);
               return 1;
             }
 
@@ -1572,13 +1564,7 @@ namespace cryptonote
 
           MDEBUG(context << "Block process time (" << blocks.size() << " blocks, " << num_txs << " txs): " << block_process_time_full + transactions_process_time_full << " (" << transactions_process_time_full << "/" << block_process_time_full << ") ms");
 
-          if (!m_core.cleanup_handle_incoming_blocks())
-          {
-            LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");
-            return 1;
-          }
-
-          m_block_queue.remove_spans(span_connection_id, start_height);
+          cleanup_on_exit.reset();
 
           const uint64_t current_blockchain_height = m_core.get_current_blockchain_height();
           if (current_blockchain_height > previous_height)
@@ -2351,8 +2337,7 @@ skip:
     {//we have to fetch more objects ids, request blockchain entry
 
       NOTIFY_REQUEST_CHAIN::request r = {};
-      context.m_expect_height = m_core.get_current_blockchain_height();
-      m_core.get_short_chain_history(r.block_ids);
+      m_core.get_short_chain_history(r.block_ids, context.m_expect_height);
       CHECK_AND_ASSERT_MES(!r.block_ids.empty(), false, "Short chain history is empty");
 
       // we'll want to start off from where we are on that peer, which may not be added yet
@@ -2488,7 +2473,7 @@ skip:
   int t_cryptonote_protocol_handler<t_core>::handle_response_chain_entry(int command, NOTIFY_RESPONSE_CHAIN_ENTRY::request& arg, cryptonote_connection_context& context)
   {
     MLOG_P2P_MESSAGE("Received NOTIFY_RESPONSE_CHAIN_ENTRY: m_block_ids.size()=" << arg.m_block_ids.size()
-      << ", m_start_height=" << arg.start_height << ", m_total_height=" << arg.total_height);
+      << ", m_start_height=" << arg.start_height << ", m_total_height=" << arg.total_height << ", expect height=" << context.m_expect_height);
     MLOG_PEER_STATE("received chain");
 
     if (context.m_expect_response != NOTIFY_RESPONSE_CHAIN_ENTRY::ID)

@@ -63,7 +63,7 @@ namespace cryptonote
      const size_t long_term_block_weight_window;
    };
 
-  extern const command_line::arg_descriptor<std::string, false, true, 2> arg_data_dir;
+  extern const command_line::arg_descriptor<std::string, false, true, 3> arg_data_dir;
   extern const command_line::arg_descriptor<bool, false> arg_testnet_on;
   extern const command_line::arg_descriptor<bool, false> arg_stagenet_on;
   extern const command_line::arg_descriptor<bool, false> arg_regtest_on;
@@ -275,6 +275,15 @@ namespace cryptonote
       * @param desc return-by-reference the command line options set to add to
       */
      static void init_options(boost::program_options::options_description& desc);
+
+     /**
+      * @brief resolves the network type based on command line arguments
+      * @param vm variables map
+      * @return network type corresponding to arg_{testnet,stagenet,regtest}_on, defaulting to MAINNET
+      * @throw std::runtime_error if more than 1 of arg_{testnet,stagenet,regtest}_on is present
+      * @throw boost::bad_any_cast if arg_{testnet,stagenet,regtest}_on weren't added to vm
+      */
+     static network_type get_network_type_from_args(const boost::program_options::variables_map& vm);
 
      /**
       * @brief initializes the core as needed
@@ -580,7 +589,7 @@ namespace cryptonote
       *
       * @note see Blockchain::get_short_chain_history
       */
-     bool get_short_chain_history(std::list<crypto::hash>& ids) const;
+     bool get_short_chain_history(std::list<crypto::hash>& ids, uint64_t& current_height) const;
 
      /**
       * @copydoc Blockchain::find_blockchain_supplement(const std::list<crypto::hash>&, NOTIFY_RESPONSE_CHAIN_ENTRY::request&) const
@@ -898,7 +907,7 @@ namespace cryptonote
       *
       * @return true iff success, false otherwise
       */
-     bool get_txpool_complement(const std::vector<crypto::hash> &hashes, std::vector<cryptonote::blobdata> &txes);
+     bool get_txpool_complement(std::vector<crypto::hash> hashes, std::vector<cryptonote::blobdata> &txes);
 
      /**
       * @brief validates some simple properties of a transaction

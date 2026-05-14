@@ -158,6 +158,8 @@ int main(int argc, char const * argv[])
       command_line::add_arg(core_settings, daemon_args::arg_zmq_rpc_bind_ip);
       command_line::add_arg(core_settings, daemon_args::arg_zmq_rpc_bind_port);
       command_line::add_arg(core_settings, daemon_args::arg_zmq_pub);
+      command_line::add_arg(core_settings, daemon_args::arg_confirm_zmq_rpc_external_bind);
+      command_line::add_arg(core_settings, daemon_args::arg_restricted_zmq_rpc);
       command_line::add_arg(core_settings, daemon_args::arg_zmq_rpc_disabled);
 
       daemonizer::init_options(hidden_options, visible_options);
@@ -245,10 +247,8 @@ int main(int argc, char const * argv[])
       return 1;
     }
 
-    const bool testnet = command_line::get_arg(vm, cryptonote::arg_testnet_on);
-    const bool stagenet = command_line::get_arg(vm, cryptonote::arg_stagenet_on);
-    const bool regtest = command_line::get_arg(vm, cryptonote::arg_regtest_on);
-    if (testnet + stagenet + regtest > 1)
+    try { cryptonote::core::get_network_type_from_args(vm); }
+    catch (const std::runtime_error&)
     {
       std::cerr << "Can't specify more than one of --tesnet and --stagenet and --regtest" << ENDL;
       return 1;

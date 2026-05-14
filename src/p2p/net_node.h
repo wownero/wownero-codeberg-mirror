@@ -56,7 +56,7 @@
 #include "math_helper.h"
 #include "net_node_common.h"
 #include "net/enums.h"
-#include "net/fwd.h"
+#include "net/parse.h"
 #include "common/command_line.h"
 
 PUSH_WARNINGS
@@ -74,7 +74,7 @@ namespace nodetool
     {}
 
     std::int64_t max_connections;
-    boost::asio::ip::tcp::endpoint address;
+    net::socks::endpoint address;
     epee::net_utils::zone zone;
     bool noise;
   };
@@ -104,7 +104,7 @@ namespace nodetool
 
   // hides boost::future and chrono stuff from mondo template file
   boost::optional<boost::asio::ip::tcp::socket>
-  socks_connect_internal(const std::atomic<bool>& stop_signal, boost::asio::io_context& service, const boost::asio::ip::tcp::endpoint& proxy, const epee::net_utils::network_address& remote);
+  socks_connect_internal(const std::atomic<bool>& stop_signal, boost::asio::io_context& service, const net::socks::endpoint& proxy, const epee::net_utils::network_address& remote);
 
 
   template<class base_type>
@@ -216,7 +216,7 @@ namespace nodetool
       epee::net_utils::network_address m_our_address; // in anonymity networks
       peerlist_manager m_peerlist;
       config m_config;
-      boost::asio::ip::tcp::endpoint m_proxy_address;
+      net::socks::endpoint m_proxy_address;
       std::atomic<unsigned int> m_current_number_of_out_peers;
       std::atomic<unsigned int> m_current_number_of_in_peers;
       boost::shared_mutex m_seed_nodes_lock;
@@ -237,12 +237,6 @@ namespace nodetool
       }
     };
 
-    enum igd_t
-    {
-      no_igd,
-      igd,
-      delayed_igd,
-    };
 
   public:
     typedef t_payload_net_handler payload_net_handler;
@@ -254,7 +248,6 @@ namespace nodetool
         m_rpc_credits_per_hash(0),
         m_allow_local_ip(false),
         m_hide_my_port(false),
-        m_igd(no_igd),
         m_offline(false),
         is_closing(false),
         m_network_id(),
@@ -379,14 +372,6 @@ namespace nodetool
     bool is_peer_used(const peerlist_entry& peer);
     bool is_peer_used(const anchor_peerlist_entry& peer);
     bool is_addr_connected(const epee::net_utils::network_address& peer);
-    void add_upnp_port_mapping_impl(uint32_t port, bool ipv6=false);
-    void add_upnp_port_mapping_v4(uint32_t port);
-    void add_upnp_port_mapping_v6(uint32_t port);
-    void add_upnp_port_mapping(uint32_t port, bool ipv4=true, bool ipv6=false);
-    void delete_upnp_port_mapping_impl(uint32_t port, bool ipv6=false);
-    void delete_upnp_port_mapping_v4(uint32_t port);
-    void delete_upnp_port_mapping_v6(uint32_t port);
-    void delete_upnp_port_mapping(uint32_t port);
     template<class t_callback>
     bool try_ping(basic_node_data& node_data, p2p_connection_context& context, const t_callback &cb);
     bool try_get_support_flags(const p2p_connection_context& context, std::function<void(p2p_connection_context&, const uint32_t&)> f);
@@ -459,7 +444,6 @@ namespace nodetool
     uint32_t m_rpc_credits_per_hash;
     bool m_allow_local_ip;
     bool m_hide_my_port;
-    igd_t m_igd;
     bool m_offline;
     bool m_use_ipv6;
     bool m_require_ipv4;

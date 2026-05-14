@@ -151,7 +151,7 @@ namespace
       return m_send_return;
     }
 
-    virtual bool close()                              { /*std::cout << "test_connection::close()" << std::endl; */return true; }
+    virtual bool close(const bool wait_for_shutdown)  { /*std::cout << "test_connection::close()" << std::endl; */return true; }
     virtual bool send_done()                          { /*std::cout << "test_connection::send_done()" << std::endl; */return true; }
     virtual bool call_run_once_service_io()           { std::cout << "test_connection::call_run_once_service_io()" << std::endl; return true; }
     virtual bool request_callback()                   { std::cout << "test_connection::request_callback()" << std::endl; return true; }
@@ -506,7 +506,6 @@ TEST_F(positive_test_connection_to_levin_protocol_handler_calls, handler_process
   }
 
   std::string compare_buffer(1024 * 4, 'c');
-  compare_buffer.resize(((1024 - sizeof(epee::levin::bucket_head2)) * 5) - sizeof(epee::levin::bucket_head2)); // add padding zeroes
 
   ASSERT_EQ(4u, m_commands_handler.notify_counter());
   ASSERT_EQ(0u, m_commands_handler.invoke_counter());
@@ -573,7 +572,7 @@ TEST_F(test_levin_protocol_handler__hanle_recv_with_invalid_data, does_not_handl
 {
   prepare_buf();
 
-  ASSERT_TRUE(m_conn->m_protocol_handler.close());
+  ASSERT_TRUE(m_conn->m_protocol_handler.close(true));
   ASSERT_FALSE(m_conn->m_protocol_handler.handle_recv(m_buf.data(), m_buf.size()));
 }
 
@@ -648,6 +647,27 @@ TEST_F(test_levin_protocol_handler__hanle_recv_with_invalid_data, handles_short_
   ASSERT_TRUE(m_conn->m_protocol_handler.handle_recv(m_buf.data(), m_buf.size()));
 
   m_req_head.m_flags = LEVIN_PACKET_END;
+  prepare_buf();
+
+  ASSERT_FALSE(m_conn->m_protocol_handler.handle_recv(m_buf.data(), m_buf.size()));
+}
+
+TEST_F(test_levin_protocol_handler__hanle_recv_with_invalid_data, handles_bad_cb)
+{
+  m_req_head.m_cb = sizeof(epee::levin::bucket_head2);
+  m_req_head.m_flags = LEVIN_PACKET_BEGIN;
+  m_req_head.m_command = 0;
+
+  epee::levin::bucket_head2 inner{};
+  inner.m_cb = 2;
+  m_in_data.resize(sizeof(epee::levin::bucket_head2));
+  prepare_buf();
+
+  ASSERT_TRUE(m_conn->m_protocol_handler.handle_recv(m_buf.data(), m_buf.size()));
+
+  m_req_head.m_cb = 1;
+  m_req_head.m_flags = LEVIN_PACKET_END;
+  m_in_data.resize(1);
   prepare_buf();
 
   ASSERT_FALSE(m_conn->m_protocol_handler.handle_recv(m_buf.data(), m_buf.size()));

@@ -766,15 +766,19 @@ namespace cryptonote
   {
     CHECK_AND_ASSERT_MES(extra_nonce.size() <= TX_EXTRA_NONCE_MAX_COUNT, false, "extra nonce could be 255 bytes max");
     size_t start_pos = tx_extra.size();
-    tx_extra.resize(tx_extra.size() + 2 + extra_nonce.size());
+    const std::size_t len_varint_bytes = tools::get_varint_byte_size(extra_nonce.size());
+    tx_extra.resize(tx_extra.size() + 1 + len_varint_bytes + extra_nonce.size());
     //write tag
     tx_extra[start_pos] = TX_EXTRA_NONCE;
     //write len
     ++start_pos;
-    tx_extra[start_pos] = static_cast<uint8_t>(extra_nonce.size());
+    unsigned char * vp = tx_extra.data() + start_pos;
+    tools::write_varint(vp, extra_nonce.size());
+    assert(vp == tx_extra.data() + tx_extra.size() - extra_nonce.size());
     //write data
-    ++start_pos;
-    memcpy(&tx_extra[start_pos], extra_nonce.data(), extra_nonce.size());
+    start_pos += len_varint_bytes;
+    if (!extra_nonce.empty())
+      memcpy(&tx_extra[start_pos], extra_nonce.data(), extra_nonce.size());
     return true;
   }
   //---------------------------------------------------------------
@@ -1351,10 +1355,10 @@ namespace cryptonote
     return res;
   }
   //---------------------------------------------------------------
-  crypto::hash get_pruned_transaction_hash(const transaction& t, const crypto::hash &pruned_data_hash)
+  bool get_pruned_transaction_hash(const transaction& t, const crypto::hash &pruned_data_hash, crypto::hash &res)
   {
     // v1 transactions hash the entire blob
-    CHECK_AND_ASSERT_THROW_MES(t.version > 1, "Hash for pruned v1 tx cannot be calculated");
+    CHECK_AND_ASSERT_MES(t.version > 1, false, "Hash for pruned v1 tx cannot be calculated");
 
     // v2 transactions hash different parts together, than hash the set of those hashes
     crypto::hash hashes[3];
@@ -1371,7 +1375,7 @@ namespace cryptonote
       const size_t inputs = t.vin.size();
       const size_t outputs = t.vout.size();
       bool r = tt.rct_signatures.serialize_rctsig_base(ba, inputs, outputs);
-      CHECK_AND_ASSERT_THROW_MES(r, "Failed to serialize rct signatures base");
+      CHECK_AND_ASSERT_MES(r, false, "Failed to serialize rct signatures base");
       cryptonote::get_blob_hash(ss.str(), hashes[1]);
     }
 
@@ -1382,9 +1386,9 @@ namespace cryptonote
       hashes[2] = pruned_data_hash;
 
     // the tx hash is the hash of the 3 hashes
-    crypto::hash res = cn_fast_hash(hashes, sizeof(hashes));
+    res = cn_fast_hash(hashes, sizeof(hashes));
     t.set_hash(res);
-    return res;
+    return true;
   }
   //---------------------------------------------------------------
   bool calculate_transaction_hash(const transaction& t, crypto::hash& res, size_t* blob_size)

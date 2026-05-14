@@ -1,5 +1,4 @@
-// Copyright (c) 2018-2022, The Monero Project
-
+// Copyright (c) 2016-2026, The Monero Project
 //
 // All rights reserved.
 //
@@ -27,46 +26,48 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "rpc/zmq_restricted_methods.h"
 
-#include <system_error>
-#include <type_traits>
+#include <algorithm>
+#include <array>
 
-namespace net
+namespace cryptonote
 {
-    //! General net errors
-    enum class error : int
-    {
-        // 0 reserved for success (as per expect<T>)
-        bogus_dnssec = 1,   //!< Invalid response signature from DNSSEC enabled domain
-        dns_query_failure,  //!< Failed to retrieve desired DNS record
-        expected_tld,       //!< Expected a tld
-        invalid_encoding,   //!< Invalid percent encoding
-        invalid_host,       //!< Hostname is not valid
-        invalid_i2p_address,
-        invalid_mask,       //!< Outside of 0-32 range
-        invalid_port,       //!< Outside of 0-65535 range
-        invalid_scheme,     //!< Provided URI scheme was unspported
-        invalid_tor_address,//!< Invalid base32 or length
-        unexpected_userinfo,//!< User or pass was provided unexpectedly
-        unsupported_address,//!< Type not supported by `get_network_address`
-
-    };
-
-    //! \return `std::error_category` for `net` namespace.
-    std::error_category const& error_category() noexcept;
-
-    //! \return `net::error` as a `std::error_code` value.
-    inline std::error_code make_error_code(error value) noexcept
-    {
-        return std::error_code{int(value), error_category()};
-    }
-}
-
-namespace std
+namespace rpc
 {
-    template<>
-    struct is_error_code_enum<::net::error>
-      : true_type
-    {};
-}
+  namespace
+  {
+    const std::array<boost::string_ref, 9> blocked_in_restricted_mode{{
+      "flush_txpool",
+      "get_peer_list",
+      "mining_status",
+      "relay_tx",
+      "save_bc",
+      "set_log_categories",
+      "set_log_level",
+      "start_mining",
+      "stop_mining"
+    }};
+  }
+
+  bool is_blocked_in_restricted_mode(const boost::string_ref method) noexcept
+  {
+    return std::binary_search(
+      blocked_in_restricted_mode.begin(),
+      blocked_in_restricted_mode.end(),
+      method
+    );
+  }
+
+  void check_blocked_methods_sorted()
+  {
+    const auto last =
+      std::is_sorted_until(blocked_in_restricted_mode.begin(), blocked_in_restricted_mode.end());
+
+    if (last != blocked_in_restricted_mode.end())
+      throw std::logic_error{
+        std::string{"ZMQ restricted-method map is not properly sorted, see "} + last->to_string()
+      };
+  }
+} // rpc
+} // cryptonote

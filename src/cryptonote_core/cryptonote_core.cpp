@@ -97,16 +97,18 @@ namespace cryptonote
   , "Fixed difficulty used for testing."
   , 0
   };
-  const command_line::arg_descriptor<std::string, false, true, 2> arg_data_dir = {
+  const command_line::arg_descriptor<std::string, false, true, 3> arg_data_dir = {
     "data-dir"
   , "Specify data directory"
   , tools::get_default_data_dir()
-  , {{ &arg_testnet_on, &arg_stagenet_on }}
-  , [](std::array<bool, 2> testnet_stagenet, bool defaulted, std::string val)->std::string {
-      if (testnet_stagenet[0])
+  , {{ &arg_testnet_on, &arg_stagenet_on, &arg_regtest_on }}
+  , [](std::array<bool, 3> nets, bool defaulted, std::string val)->std::string {
+      if (nets[0])
         return (boost::filesystem::path(val) / "testnet").string();
-      else if (testnet_stagenet[1])
+      else if (nets[1])
         return (boost::filesystem::path(val) / "stagenet").string();
+      else if (nets[2])
+        return (boost::filesystem::path(val) / "fake").string();
       return val;
     }
   };
@@ -344,13 +346,21 @@ namespace cryptonote
     BlockchainDB::init_options(desc);
   }
   //-----------------------------------------------------------------------------------------------
+  network_type core::get_network_type_from_args(const boost::program_options::variables_map& vm)
+  {
+    const bool testnet = command_line::get_arg(vm, arg_testnet_on);
+    const bool stagenet = command_line::get_arg(vm, arg_stagenet_on);
+    const bool regtest = command_line::get_arg(vm, arg_regtest_on);
+    if (testnet + stagenet + regtest > 1)
+      throw std::runtime_error("More than one network type argument was specified");
+    return testnet ? TESTNET : stagenet ? STAGENET : regtest ? FAKECHAIN : MAINNET;
+  }
+  //-----------------------------------------------------------------------------------------------
   bool core::handle_command_line(const boost::program_options::variables_map& vm)
   {
     if (m_nettype != FAKECHAIN)
     {
-      const bool testnet = command_line::get_arg(vm, arg_testnet_on);
-      const bool stagenet = command_line::get_arg(vm, arg_stagenet_on);
-      m_nettype = testnet ? TESTNET : stagenet ? STAGENET : MAINNET;
+      m_nettype = get_network_type_from_args(vm);
     }
 
     m_config_folder = command_line::get_arg(vm, arg_data_dir);
@@ -474,7 +484,10 @@ namespace cryptonote
     bool keep_fakechain = command_line::get_arg(vm, arg_keep_fakechain);
 
     boost::filesystem::path folder(m_config_folder);
-    if (m_nettype == FAKECHAIN)
+    // --regtest already appends "fake" through arg_data_dir. Some tests set
+    // FAKECHAIN directly through test_options instead of command line args, so
+    // preserve the legacy fakechain isolation for those callers.
+    if (m_nettype == FAKECHAIN && !command_line::get_arg(vm, arg_regtest_on))
       folder /= "fake";
 
     // make sure the data directory exists, and try to lock it
@@ -1081,7 +1094,7 @@ namespace cryptonote
     const bool res = m_mempool.add_tx(tx, tx_hash, blob, tx_weight, tvc, tx_relay, relayed, version);
 
     // If new incoming tx passed verification and entered the pool, notify ZMQ
-    if (!tvc.m_verifivation_failed && tvc.m_added_to_pool && matches_category(tx_relay, relay_category::legacy))
+    if (!tvc.m_verifivation_failed && res && matches_category(tvc.m_relay, relay_category::legacy))
     {
       m_blockchain_storage.notify_txpool_event({txpool_event{
         .tx = tx,
@@ -1302,20 +1315,23 @@ namespace cryptonote
       NOTIFY_NEW_FLUFFY_BLOCK::request arg{};
       arg.current_blockchain_height = m_blockchain_storage.get_current_blockchain_height();
       std::vector<crypto::hash> missed_txs;
-      std::vector<cryptonote::blobdata> txs;
-      m_blockchain_storage.get_transactions_blobs(b.tx_hashes, txs, missed_txs);
+      for (const auto &tx_hash : b.tx_hashes)
+      {
+        if (m_blockchain_storage.have_tx(tx_hash))
+          continue;
+        missed_txs.push_back(tx_hash);
+      }
       if(missed_txs.size() &&  m_blockchain_storage.get_block_id_by_height(get_block_height(b)) != get_block_hash(b))
       {
         LOG_PRINT_L1("Block found but, seems that reorganize just happened after that, do not relay this block");
         return true;
       }
-      CHECK_AND_ASSERT_MES(txs.size() == b.tx_hashes.size() && !missed_txs.size(), false, "can't find some transactions in found block:" << get_block_hash(b) << " txs.size()=" << txs.size()
-        << ", b.tx_hashes.size()=" << b.tx_hashes.size() << ", missed_txs.size()" << missed_txs.size());
+      CHECK_AND_ASSERT_MES(!missed_txs.size(), false, "can't find some transactions in found block:" << get_block_hash(b)
+        << " b.tx_hashes.size()=" << b.tx_hashes.size() << ", missed_txs.size()" << missed_txs.size());
 
       block_to_blob(b, arg.b.block);
-      //pack transactions
-      for(auto& tx:  txs)
-        arg.b.txs.push_back({tx, crypto::null_hash});
+      // Relay an empty fluffy block
+      arg.b.txs.clear();
 
       m_pprotocol->relay_block(arg, exclude_context);
     }
@@ -1346,7 +1362,11 @@ namespace cryptonote
   bool core::prepare_handle_incoming_blocks(const std::vector<block_complete_entry> &blocks_entry, std::vector<block> &blocks)
   {
     m_incoming_tx_lock.lock();
-    if (!m_blockchain_storage.prepare_handle_incoming_blocks(blocks_entry, blocks))
+    bool success = false;
+    try { success = m_blockchain_storage.prepare_handle_incoming_blocks(blocks_entry, blocks); }
+    catch (const std::exception &e) { MERROR("Failed prepare handle incoming blocks: " << e.what()); }
+    catch (...) { MERROR("Failed prepare handling incoming blocks"); }
+    if (!success)
     {
       cleanup_handle_incoming_blocks(false);
       return false;
@@ -1533,9 +1553,9 @@ namespace cryptonote
     return m_mempool.get_pool_for_rpc(tx_infos, key_image_infos);
   }
   //-----------------------------------------------------------------------------------------------
-  bool core::get_short_chain_history(std::list<crypto::hash>& ids) const
+  bool core::get_short_chain_history(std::list<crypto::hash>& ids, uint64_t& current_height) const
   {
-    return m_blockchain_storage.get_short_chain_history(ids);
+    return m_blockchain_storage.get_short_chain_history(ids, current_height);
   }
   //-----------------------------------------------------------------------------------------------
   bool core::handle_get_objects(NOTIFY_REQUEST_GET_OBJECTS::request& arg, NOTIFY_RESPONSE_GET_OBJECTS::request& rsp, cryptonote_connection_context& context)
@@ -1890,9 +1910,9 @@ namespace cryptonote
     m_blockchain_storage.flush_invalid_blocks();
   }
   //-----------------------------------------------------------------------------------------------
-  bool core::get_txpool_complement(const std::vector<crypto::hash> &hashes, std::vector<cryptonote::blobdata> &txes)
+  bool core::get_txpool_complement(std::vector<crypto::hash> hashes, std::vector<cryptonote::blobdata> &txes)
   {
-    return m_mempool.get_complement(hashes, txes);
+    return m_mempool.get_complement(std::move(hashes), txes);
   }
   //-----------------------------------------------------------------------------------------------
   bool core::update_blockchain_pruning()

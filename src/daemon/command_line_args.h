@@ -98,7 +98,7 @@ namespace daemon_args
 
   const command_line::arg_descriptor<std::string> arg_proxy = {
     "proxy",
-    "Network communication through proxy: <socks-ip:port> i.e. \"127.0.0.1:9050\"",
+    "Network communication through proxy: [socks5://[user:pass@]]<socks-ip:port> i.e. \"127.0.0.1:9050\"",
     "",
   };
   const command_line::arg_descriptor<bool> arg_proxy_allow_dns_leaks = {
@@ -134,6 +134,18 @@ namespace daemon_args
   const command_line::arg_descriptor<std::vector<std::string>> arg_zmq_pub = {
     "zmq-pub"
   , "Address for ZMQ pub - tcp://ip:port or ipc://path"
+  };
+
+  const command_line::arg_descriptor<bool> arg_restricted_zmq_rpc = {
+    "restricted-zmq-rpc"
+  , "Restrict ZMQ RPC by disabling some sensitive methods; does not guarantee filtering of sensitive data"
+  , false
+  };
+
+  const command_line::arg_descriptor<bool> arg_confirm_zmq_rpc_external_bind = {
+    "confirm-zmq-rpc-external-bind"
+  , "Confirm zmq-rpc-bind-ip value is NOT a loopback (local) IP"
+  , false
   };
 
   const command_line::arg_descriptor<bool> arg_zmq_rpc_disabled = {

@@ -337,14 +337,15 @@ namespace cryptonote
         MERROR("internal error: error adding transaction to txpool: " << e.what());
         return false;
       }
-
-      static_assert(unsigned(relay_method::none) == 0, "expected relay_method::none value to be zero");
-      if(meta.fee > 0 && tx_relay != relay_method::forward)
-        tvc.m_relay = tx_relay;
     }
 
     tvc.m_verifivation_failed = false;
-    m_txpool_weight += tx_weight;
+    if (tvc.m_added_to_pool)
+      m_txpool_weight += tx_weight;
+
+    static_assert(unsigned(relay_method::none) == 0, "expected relay_method::none value to be zero");
+    if (meta.fee > 0 && tx_relay != relay_method::forward)
+      tvc.m_relay = tx_relay;
 
     ++m_cookie;
 
@@ -667,17 +668,24 @@ namespace cryptonote
     return true;
   }
   //---------------------------------------------------------------------------------
-  bool tx_memory_pool::get_complement(const std::vector<crypto::hash> &hashes, std::vector<cryptonote::blobdata> &txes) const
+  bool tx_memory_pool::get_complement(std::vector<crypto::hash> hashes, std::vector<cryptonote::blobdata> &txes) const
   {
     CRITICAL_REGION_LOCAL(m_transactions_lock);
     CRITICAL_REGION_LOCAL1(m_blockchain);
+
+    // Sort so we can do binary search later
+    std::sort(hashes.begin(), hashes.end());
 
     m_blockchain.for_all_txpool_txes([this, &hashes, &txes](const crypto::hash &txid, const txpool_tx_meta_t &meta, const cryptonote::blobdata_ref*) {
       const auto tx_relay_method = meta.get_relay_method();
       if (tx_relay_method != relay_method::block && tx_relay_method != relay_method::fluff)
         return true;
-      const auto i = std::find(hashes.begin(), hashes.end(), txid);
-      if (i == hashes.end())
+
+      // Do binary search for our pool TXID in given list, skip to next if already present
+      const auto hash_it = std::lower_bound(hashes.cbegin(), hashes.cend(), txid);
+      if (hash_it != hashes.cend() && *hash_it == txid)
+        return true;
+
       {
         cryptonote::blobdata bd;
         try

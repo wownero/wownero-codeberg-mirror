@@ -1210,7 +1210,9 @@ class OS : base::StaticClass {
   ///
   /// @detail For android systems this is device name with its manufacturer and model seperated by hyphen
   static std::string currentHost(void);
-  /// @brief Whether or not terminal supports colors
+  /// @brief Whether or not the named terminal supports colors
+  static bool termSupportsColor(std::string& term);
+  /// @brief Whether or not the process's current terminal supports colors
   static bool termSupportsColor(void);
 };
 /// @brief Contains utilities for cross-platform date/time. This class make use of el::base::utils::Str
@@ -3272,35 +3274,13 @@ class Writer : base::NoCopy {
     processDispatch();
   }
 
-  template <typename T>
-  inline typename std::enable_if<std::is_integral<T>::value, Writer&>::type
-  operator<<(T log) {
+  Writer& operator<<(const std::string &log) {
 #if ELPP_LOGGING_ENABLED
   if (m_proceed) {
     m_messageBuilder << log;
   }
 #endif  // ELPP_LOGGING_ENABLED
   return *this;
-  }
-
-  template <typename T>
-  inline typename std::enable_if<!std::is_integral<T>::value, Writer&>::type
-  operator<<(const T& log) {
-#if ELPP_LOGGING_ENABLED
-    if (m_proceed) {
-      m_messageBuilder << log;
-    }
-#endif  // ELPP_LOGGING_ENABLED
-    return *this;
-  }
-
-  inline Writer& operator<<(std::ostream& (*log)(std::ostream&)) {
-#if ELPP_LOGGING_ENABLED
-    if (m_proceed) {
-      m_messageBuilder << log;
-    }
-#endif  // ELPP_LOGGING_ENABLED
-    return *this;
   }
 
   inline operator bool() {
@@ -3619,8 +3599,9 @@ class DefaultPerformanceTrackingCallback : public PerformanceTrackingCallback {
         ss << ELPP_LITERAL("]");
       }
     }
+    const std::string str = ss.str();
     el::base::Writer(m_data->performanceTracker()->level(), m_data->file(), m_data->line(), m_data->func()).construct(1,
-        m_data->loggerId().c_str()) << ss.str();
+        m_data->loggerId().c_str()) << str;
   }
  private:
   const PerformanceTrackingData* m_data;
