@@ -1,6 +1,6 @@
 # ~~Mo~~Wownero -  Such privacy! Many coins! Wow!
 
-[<img src="https://suchwow.xyz/uploads/J28THOqDiNkV.jpg">](https://suchwow.xyz/meme/157)
+<img src="https://codeberg.org/wownero/meta/raw/commit/e7bd4f0e4520b7dc0a7b0bd01083b12b2667365b/images/wow.gif">
 
 ## Introduction
 
@@ -11,29 +11,28 @@ Unlike Opposing Projects.
 ## Resources
 
 - Web: [wownero.org](https://wownero.org)
+- Wownero Portal: [wowne.ro](https://wowne.ro)
 - Twitter: [@w0wn3r0](https://twitter.com/w0wn3r0)
 - Reddit: [/r/wownero](https://www.reddit.com/r/wownero)
 - Mail: [wownero@wownero.org](mailto:wownero@wownero.org)
 - Git: [codeberg.org/wownero/wownero](https://codeberg.org/wownero/wownero)
 - Matrix General Chat Room: [#wownero-gen:wowne.ro](https://matrix.to/#/#wownero-gen:wowne.ro)
 - IRC: [OFTC #wownero](https://webchat.oftc.net/?channels=wownero)
-- Discord: [discord.gg/ykZyAzJhDK](https://discord.com/invite/ykZyAzJhDK)
+- Discord: [discord.gg/q2rmxeYvWy](https://discord.gg/q2rmxeYvWy)
 - Telegram: [t.me/wownero](https://t.me/wownero)
 - Public Node Status: [monero.fail](https://monero.fail/?chain=wownero&network=mainnet)
-- Wownero Memes: [suchwow.xyz](https://suchwow.xyz)
-- Market Info: [coinmarketcap.com](https://coinmarketcap.com/currencies/wownero), [coingecko.com](https://www.coingecko.com/en/coins/wownero/usd)
 
 ## Exchanges
 
 - [BasicSwap DEX](https://basicswapdex.com) ([Installation Guide](https://academy.particl.io/en/latest/basicswap-guides/basicswapguides_installation.html))
 - [NonLogs](https://nonlogs.com/trade/WOW-BTC)
 - [AltQuick](https://altquick.com/market/Wownero)
+- [CexSwap](https://cexswap.cc)
 
 ## Wallets
 
 - Wonero CLI Wallet: [codeberg.org/wownero/wownero](https://codeberg.org/wownero/wownero/releases)
 - Stack Wallet iOS & Android Mobile Wallet: [stackwallet.com](https://stackwallet.com)
-- Cake Wallet [cakewallet.com](https://cakewallet.com)
 
 ## Blockchain Explorers
 
@@ -142,6 +141,6 @@ Once node is synced to network, run the CLI wallet by entering:
 
 Type `help` in CLI wallet to see standard commands (for advanced options, type `help_advanced`).
 
-Copyright (c) 2014-2025 The Monero Project.
+Copyright (c) 2014-2026 The Monero Project.
 
 Portions Copyright (c) 2012-2013 The Cryptonote developers.
