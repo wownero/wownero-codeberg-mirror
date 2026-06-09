@@ -1,0 +1,198 @@
+name: release
+
+# Cross-builds Wownero release binaries via contrib/depends and attaches them to
+# a GitHub Release. Asset names match the established convention from past releases:
+#   wownero-<host-triplet>-<version>.{tar.bz2,zip}
+#
+# Runs on the GitHub mirror's hosted runners. Triggers:
+#   * pushing a version tag (v*)       -> builds + publishes a Release for that tag
+#   * manual dispatch (workflow_dispatch):
+#       - ref:     tag/branch/commit to build (e.g. v0.11.4.0); blank = default branch
+#       - publish: if true, attach the built assets to the Release for `ref`
+#                  (use this to add binaries to an already-tagged release)
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag/branch/commit to build (e.g. v0.11.4.0)'
+        required: false
+        default: ''
+      publish:
+        description: 'Attach assets to the GitHub Release for the built tag'
+        type: boolean
+        required: false
+        default: false
+
+env:
+  APT_SET_CONF: |
+    tee -a /etc/apt/apt.conf.d/80-custom << EOF
+    Acquire::Retries "3";
+    Acquire::http::Timeout "120";
+    Acquire::ftp::Timeout "120";
+    EOF
+  CCACHE_SETTINGS: |
+    ccache --max-size=150M
+    ccache --set-config=compression=true
+
+jobs:
+  build-cross:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+      env:
+        DEBIAN_FRONTEND: noninteractive
+        CCACHE_TEMPDIR: /tmp/.ccache-temp
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain:
+          - name: "x86_64-linux-gnu"
+            host: "x86_64-unknown-linux-gnu"
+            packages: "gperf cmake python3-zmq libdbus-1-dev libharfbuzz-dev"
+            archive: "tar.bz2"
+          - name: "aarch64-linux-gnu"
+            host: "aarch64-linux-gnu"
+            packages: "python3 gperf g++-aarch64-linux-gnu"
+            archive: "tar.bz2"
+          - name: "arm-linux-gnueabihf"
+            host: "arm-linux-gnueabihf"
+            packages: "python3 gperf g++-arm-linux-gnueabihf"
+            archive: "tar.bz2"
+          - name: "riscv64-linux-gnu"
+            host: "riscv64-linux-gnu"
+            packages: "python3 gperf g++-riscv64-linux-gnu"
+            archive: "tar.bz2"
+          - name: "i686-linux-gnu"
+            host: "i686-pc-linux-gnu"
+            packages: "gperf cmake g++-multilib python3-zmq"
+            archive: "tar.bz2"
+          - name: "x86_64-w64-mingw32"
+            host: "x86_64-w64-mingw32"
+            packages: "cmake python3 g++-mingw-w64-x86-64"
+            archive: "zip"
+          - name: "i686-w64-mingw32"
+            host: "i686-w64-mingw32"
+            packages: "python3 g++-mingw-w64-i686"
+            archive: "zip"
+          - name: "x86_64-apple-darwin11"
+            host: "x86_64-apple-darwin11"
+            packages: "cmake imagemagick libcap-dev librsvg2-bin libz-dev libbz2-dev libtiff-tools python3-dev python3-setuptools-git libtinfo5"
+            archive: "tar.bz2"
+          - name: "aarch64-apple-darwin11"
+            host: "aarch64-apple-darwin11"
+            packages: "cmake imagemagick libcap-dev librsvg2-bin libz-dev libbz2-dev libtiff-tools python3-dev python3-setuptools-git libtinfo5"
+            archive: "tar.bz2"
+    name: ${{ matrix.toolchain.name }}
+    steps:
+      - name: set apt conf
+        run: ${{ env.APT_SET_CONF }}
+      - name: install dependencies
+        run: |
+          apt update
+          apt -y install build-essential libtool cmake autotools-dev automake \
+            pkg-config python3 gperf bsdmainutils curl git ca-certificates unzip \
+            zip bzip2 ccache ${{ matrix.toolchain.packages }}
+      - name: configure git
+        run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+          submodules: recursive
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.toolchain.host }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.toolchain.host }}-
+      - name: depends cache
+        uses: actions/cache@v4
+        with:
+          path: contrib/depends/built
+          key: depends-${{ matrix.toolchain.host }}-${{ hashFiles('contrib/depends/packages/*') }}
+          restore-keys: |
+            depends-${{ matrix.toolchain.host }}-${{ hashFiles('contrib/depends/packages/*') }}
+            depends-${{ matrix.toolchain.host }}-
+      - name: macOS SDK cache
+        uses: actions/cache@v4
+        with:
+          path: contrib/depends/sdk-sources
+          key: sdk-${{ matrix.toolchain.host }}
+          restore-keys: sdk-${{ matrix.toolchain.host }}
+      - name: prepare mingw32
+        if: ${{ matrix.toolchain.host == 'x86_64-w64-mingw32' || matrix.toolchain.host == 'i686-w64-mingw32' }}
+        run: |
+          update-alternatives --set ${{ matrix.toolchain.host }}-g++ $(which ${{ matrix.toolchain.host }}-g++-posix)
+          update-alternatives --set ${{ matrix.toolchain.host }}-gcc $(which ${{ matrix.toolchain.host }}-gcc-posix)
+      - name: build
+        run: |
+          ${{ env.CCACHE_SETTINGS }}
+          make depends target=${{ matrix.toolchain.host }} -j$(nproc)
+      - name: determine version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${{ github.ref_name }}"
+          elif [ -n "${{ github.event.inputs.ref }}" ]; then
+            VERSION="${{ github.event.inputs.ref }}"
+          else
+            VERSION="$(git describe --tags --always)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DIST="wownero-${{ matrix.toolchain.name }}-${VERSION}"
+          BIN="build/${{ matrix.toolchain.host }}/release/bin"
+          mkdir -p "dist/${DIST}"
+          cp "${BIN}"/wownero* "dist/${DIST}/" 2>/dev/null || true
+          cp LICENSE README.md "dist/${DIST}/" 2>/dev/null || true
+          ( cd dist
+            if [ "${{ matrix.toolchain.archive }}" = "zip" ]; then
+              zip -r9 "${DIST}.zip" "${DIST}"
+            else
+              tar -cjf "${DIST}.tar.bz2" "${DIST}"
+            fi )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wownero-${{ matrix.toolchain.name }}
+          path: |
+            dist/*.zip
+            dist/*.tar.bz2
+          if-no-files-found: error
+
+  publish:
+    needs: build-cross
+    runs-on: ubuntu-latest
+    if: ${{ github.ref_type == 'tag' || github.event.inputs.publish == 'true' }}
+    permissions:
+      contents: write
+    steps:
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: resolve tag + checksums
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ github.event.inputs.ref }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          cd artifacts
+          sha256sum *.zip *.tar.bz2 2>/dev/null | tee SHA256SUMS.txt
+      - name: publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          files: |
+            artifacts/*.zip
+            artifacts/*.tar.bz2
+            artifacts/SHA256SUMS.txt
+          fail_on_unmatched_files: true
